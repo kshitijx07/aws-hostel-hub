@@ -5,6 +5,8 @@ import AdminLayout from '../components/AdminLayout';
 import { FaTrash } from 'react-icons/fa';
 import './EditHostel.css';
 
+const API_URL = import.meta.env.VITE_API_BASE_URL;
+
 const EditHostel = () => {
   const { id } = useParams();
   const { token } = useContext(AuthContext);
@@ -28,7 +30,7 @@ const EditHostel = () => {
 
   const fetchHostel = async () => {
     try {
-      const response = await fetch(`http://localhost:5000/api/hostels/${id}`);
+      const response = await fetch(`${API_URL}/api/hostels/${id}`);
       const data = await response.json();
       
       setFormData({
@@ -70,7 +72,7 @@ const EditHostel = () => {
     if (!window.confirm('Are you sure you want to delete this image?')) return;
 
     try {
-      const response = await fetch(`http://localhost:5000/api/hostels/${id}/image`, {
+      const response = await fetch(`${API_URL}/api/hostels/${id}/image`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -105,7 +107,7 @@ const EditHostel = () => {
     });
 
     try {
-      const response = await fetch(`http://localhost:5000/api/hostels/${id}`, {
+      const response = await fetch(`${API_URL}/api/hostels/${id}`, {
         method: 'PUT',
         headers: {
           Authorization: `Bearer ${token}`

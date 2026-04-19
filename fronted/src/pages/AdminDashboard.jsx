@@ -5,6 +5,8 @@ import AdminLayout from '../components/AdminLayout';
 import { FaHome, FaTasks, FaCheckCircle, FaClock, FaTimesCircle } from 'react-icons/fa';
 import './AdminDashboard.css';
 
+const API_URL = import.meta.env.VITE_API_BASE_URL;
+
 const AdminDashboard = () => {
   const { token } = useContext(AuthContext);
   const navigate = useNavigate();
@@ -25,10 +27,10 @@ const AdminDashboard = () => {
   const fetchDashboardData = async () => {
     try {
       const [hostelsRes, applicationsRes] = await Promise.all([
-        fetch('http://localhost:5000/api/hostels/admin/my-hostels', {
+        fetch(`${API_URL}/api/hostels/admin/my-hostels`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
-        fetch('http://localhost:5000/api/applications/admin/applications', {
+        fetch(`${API_URL}/api/applications/admin/applications`, {
           headers: { Authorization: `Bearer ${token}` }
         })
       ]);

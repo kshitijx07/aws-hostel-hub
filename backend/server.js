@@ -11,7 +11,26 @@ dotenv.config();
 const app = express();
 
 // Middleware
-app.use(cors());
+const allowedOrigins = [
+  'http://localhost:5173', // Vite default development port
+  'http://localhost:3000', // Alternative local fallback
+  process.env.FRONTEND_URL // Production: https://dXXXXXXXX.cloudfront.net
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // allow requests with no origin (like Same-Origin requests from the unified domain)
+    // or requests from our whitelisted arrays
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Blocked by CORS policy'));
+    }
+  },
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Connect to MongoDB

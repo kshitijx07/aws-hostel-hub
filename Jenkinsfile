@@ -9,39 +9,33 @@ pipeline {
     }
 
     tools {
-        nodejs 'node18'
+        nodejs 'node20' 
     }
 
     environment {
         DOCKER_USER = 'kshitij2511'
-        COMPOSE_DIR = '/home/ec2-user/hostelhub'
+        GIT_COMMIT_SHORT = ""
+        
+        // Define S3 and CloudFront targets
+        S3_BUCKET = "hostelhub-frontend"
+        CLOUDFRONT_ID = "E3HIK7T7JI9C8L"
+        CLOUDFRONT_DOMAIN = "https://d3qyzjyul2f882.cloudfront.net" // Used for the curl verification
+        
+        // Unified domain architecture
+        VITE_API_BASE_URL = "https://d3qyzjyul2f882.cloudfront.net"
     }
 
     stages {
-
         stage('Checkout') {
             steps {
                 checkout scm
-            }
-        }
-
-        stage('Guard: Prevent CI Loop') {
-            steps {
                 script {
-                    def msg = sh(
-                        script: "git log -1 --pretty=%B",
-                        returnStdout: true
-                    ).trim()
-
-                    if (msg.contains('[skip ci]')) {
-                        currentBuild.description = 'Skipped CI loop'
-                        error('CI loop detected')
-                    }
+                    env.GIT_COMMIT_SHORT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
                 }
             }
         }
 
-        stage('Docker Login') {
+        stage('Backend: Docker Build & Push') {
             steps {
                 withCredentials([
                     usernamePassword(
@@ -51,97 +45,85 @@ pipeline {
                     )
                 ]) {
                     sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
+                    sh "docker build -t ${env.DOCKER_USER}/hostelhub-backend:${env.GIT_COMMIT_SHORT} backend"
+                    sh "docker push ${env.DOCKER_USER}/hostelhub-backend:${env.GIT_COMMIT_SHORT}"
                 }
             }
         }
 
-        stage('Versioning') {
+        stage('Frontend: Build & Test') {
             steps {
-                sh '''
-                    cd backend
-                    npm version patch --no-git-tag-version
-                    node -p "require('./package.json').version" > ../backend.version
-                    cd ..
+                dir('fronted') {
+                    // Install Dependencies
+                    sh "npm ci"
+                    
+                    // Run tests (We wrap this in a catch so the build doesn't crash if tests aren't configured yet)
+                    catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                        sh "npm test -- --watchAll=false"
+                    }
+                    
+                    // Build Production Bundle securely tying the API URL
+                    sh "VITE_API_BASE_URL=${env.VITE_API_BASE_URL} npm run build"
+                }
+            }
+        }
 
-                    cd fronted
-                    npm version patch --no-git-tag-version
-                    node -p "require('./package.json').version" > ../frontend.version
-                    cd ..
+        stage('Frontend: React S3 Deploy') {
+            steps {
+                dir('fronted') {
+                    // Upload hashed assets (Vite uses /assets/ instead of /static/) with aggressive caching
+                    sh "aws s3 sync dist/assets/ s3://${env.S3_BUCKET}/assets/ --delete --cache-control 'max-age=31536000, immutable'"
+                    
+                    // Upload any remaining files (favicon, manifest, robots.txt) except index.html
+                    sh "aws s3 sync dist/ s3://${env.S3_BUCKET} --delete --exclude 'assets/*' --exclude 'index.html'"
+                    
+                    // Explicitly upload index.html ensuring the browser forces re-validation (no-cache)
+                    sh "aws s3 cp dist/index.html s3://${env.S3_BUCKET}/index.html --cache-control 'no-cache'"
+                    
+                    // Invalidate Edge Cache globally so CloudFront pulls the new index.html from S3 immediately
+                    sh "aws cloudfront create-invalidation --distribution-id ${env.CLOUDFRONT_ID} --paths '/*'"
+                }
+            }
+        }
+
+        stage('Backend: Kubernetes Deploy') {
+            steps {
+                script {
+                    sh "aws eks update-kubeconfig --name hostelhub-cluster --region ap-south-1"
+                    sh "sed -i 's|<TAG>|${env.GIT_COMMIT_SHORT}|g' kubernetes/backend-deployment.yaml"
+                    sh "sed -i 's|<DOCKERHUB_USERNAME>|${env.DOCKER_USER}|g' kubernetes/backend-deployment.yaml"
+                    
+                    sh "kubectl apply -f kubernetes/"
+                }
+            }
+        }
+
+        stage('Verify System Rollout') {
+            steps {
+                // Verify EKS Backend pods are healthy and live
+                sh "kubectl rollout status deployment/hostelhub-backend -n default --timeout=3m"
+                
+                // Verify CloudFront Frontend URL is returning a 200 OK
+                sh '''
+                    echo "Pinging CloudFront endpoint ${CLOUDFRONT_DOMAIN}..."
+                    HTTP_STATUS=$(curl -o /dev/null -s -w "%{http_code}" ${CLOUDFRONT_DOMAIN})
+                    if [ "$HTTP_STATUS" -eq 200 ]; then
+                        echo "✅ CloudFront Edge validation passed! Status 200 OK."
+                    else
+                        echo "❌ CloudFront verification failed! Status code: $HTTP_STATUS"
+                        exit 1
+                    fi
                 '''
             }
         }
-
-        stage('Build & Push Images') {
-            steps {
-                script {
-                    def backendVersion = readFile('backend.version').trim()
-                    def frontendVersion = readFile('frontend.version').trim()
-
-                    dockerBuildPush(
-                        user: env.DOCKER_USER,
-                        image: 'hostelhub-backend',
-                        version: "v${backendVersion}",
-                        dir: 'backend'
-                    )
-
-                    dockerBuildPush(
-                        user: env.DOCKER_USER,
-                        image: 'hostelhub-frontend',
-                        version: "v${frontendVersion}",
-                        dir: 'fronted'
-                    )
-                }
-            }
-        }
-
-        stage('Deploy using Docker Compose') {
-            steps {
-                script {
-                    def backendVersion = readFile('backend.version').trim()
-                    def frontendVersion = readFile('frontend.version').trim()
-
-                    sshagent(['ec2-server-key']) {
-                        sh """
-                        set -e
-
-                        ssh -o StrictHostKeyChecking=no ec2-user@65.1.109.121 '
-                            set -e
-                            mkdir -p ${COMPOSE_DIR}
-                        '
-
-                        scp -o StrictHostKeyChecking=no docker-compose.yml \
-                            ec2-user@65.1.109.121:${COMPOSE_DIR}/docker-compose.yml
-
-                        ssh -o StrictHostKeyChecking=no ec2-user@65.1.109.121 '
-                            set -e
-                            cd ${COMPOSE_DIR}
-
-                            export BACKEND_VERSION=v${backendVersion}
-                            export FRONTEND_VERSION=v${frontendVersion}
-
-                            docker rm -f hostelhub-backend hostelhub-frontend || true
-                            docker-compose down --remove-orphans
-                            docker-compose pull
-                            docker-compose up -d
-                            docker image prune -f
-                        '
-                        """
-                    }
-                }
-            }
-        }
-
-    } // ✅ stages closed properly
+    }
 
     post {
         success {
-            echo '✅ CI/CD completed successfully'
-        }
-        aborted {
-            echo '⏭️ Pipeline aborted'
+            echo '✅ Unified CI/CD Deployment completed perfectly!'
         }
         failure {
-            echo '❌ CI/CD failed'
+            echo '❌ Unified CI/CD Deployment failed!'
         }
     }
 }

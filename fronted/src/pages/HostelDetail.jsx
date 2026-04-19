@@ -5,6 +5,8 @@ import { getHostelById, createApplication } from '../services/api';
 import { AuthContext } from '../context/AuthContext';
 import './HostelDetail.css';
 
+const API_URL = import.meta.env.VITE_API_BASE_URL;
+
 const HostelDetail = () => {
   const [hostel, setHostel] = useState(null);
   const [message, setMessage] = useState('');
@@ -56,7 +58,7 @@ const HostelDetail = () => {
     // Check if student has already applied
     if (user && user.role === 'student') {
       try {
-        const response = await fetch(`http://localhost:5000/api/applications/student/my-applications`, {
+        const response = await fetch(`${API_URL}/api/applications/student/my-applications`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         const applications = await response.json();

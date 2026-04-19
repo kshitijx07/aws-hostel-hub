@@ -5,6 +5,8 @@ import AdminLayout from '../components/AdminLayout';
 import { FaEdit, FaTrash, FaEye, FaMapMarkerAlt, FaRupeeSign } from 'react-icons/fa';
 import './MyHostels.css';
 
+const API_URL = import.meta.env.VITE_API_BASE_URL;
+
 const MyHostels = () => {
   const { token } = useContext(AuthContext);
   const navigate = useNavigate();
@@ -17,7 +19,7 @@ const MyHostels = () => {
 
   const fetchHostels = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/hostels/admin/my-hostels', {
+      const response = await fetch(`${API_URL}/api/hostels/admin/my-hostels`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await response.json();
@@ -33,7 +35,7 @@ const MyHostels = () => {
     if (!window.confirm('Are you sure you want to delete this hostel?')) return;
 
     try {
-      const response = await fetch(`http://localhost:5000/api/hostels/${id}`, {
+      const response = await fetch(`${API_URL}/api/hostels/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });

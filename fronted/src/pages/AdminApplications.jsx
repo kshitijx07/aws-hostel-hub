@@ -6,6 +6,8 @@ import ApplicationDetailModal from '../components/ApplicationDetailModal';
 import { FaFilter, FaEye, FaTrash } from 'react-icons/fa';
 import './AdminApplications.css';
 
+const API_URL = import.meta.env.VITE_API_BASE_URL;
+
 const AdminApplications = () => {
   const { token } = useContext(AuthContext);
   const [applications, setApplications] = useState([]);
@@ -29,7 +31,7 @@ const AdminApplications = () => {
   const fetchData = async () => {
     const [appsData, hostelsRes] = await Promise.all([
       getAdminApplications(),
-      fetch('http://localhost:5000/api/hostels/admin/my-hostels', {
+      fetch(`${API_URL}/api/hostels/admin/my-hostels`, {
         headers: { Authorization: `Bearer ${token}` }
       })
     ]);
@@ -63,7 +65,7 @@ const AdminApplications = () => {
 
   const handleViewDetails = async (appId) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/applications/${appId}`, {
+      const response = await fetch(`${API_URL}/api/applications/${appId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await response.json();
